@@ -4,69 +4,67 @@ using GameNetcodeStuff;
 using Unity.Netcode;
 using UnityEngine;
 
-namespace TheKirby
-{
-    // You may be wondering, how does the Example Enemy know it is from class TheKirbyAI?
-    // Well, we give it a reference to this class in the Unity project where we make the asset bundle.
-    // Asset bundles cannot contain scripts, so our script lives here. It is important to get the
-    // reference right, or else it will not find this file. See the guide for more information.
+namespace TheKirby {
+    class ExampleEnemyAI : EnemyAI {
 
-    class ExampleEnemyAI : EnemyAI
-    {
-        // We set these in our Asset Bundle, so we can disable warning CS0649:
-        // Field 'field' is never assigned to, and will always have its default value 'value'
 #pragma warning disable 0649
         public Transform turnCompass = null!;
         public Transform attackArea = null!;
 #pragma warning restore 0649
-        float timeSinceHittingLocalPlayer;
-        float timeSinceNewRandPos;
-        Vector3 positionRandomness;
-        Vector3 StalkPos;
-        System.Random enemyRandom = null!;
-        bool isDeadAnimationDone;
+        public AudioClip attackSFX = null!;
+        public AudioClip fullStateSFX = null!;
+
+        private float timeSinceNewRandPos;
+        private Vector3 positionRandomness;
+        private Vector3 StalkPos;
+        private System.Random enemyRandom = null!;
+        private bool isDeadAnimationDone;
 
         [SerializeField] private string startWalkTrigger = "startWalk";
         [SerializeField] private string stopWalkTrigger = "stopWalk";
         [SerializeField] private string startAttackTrigger = "startAttack";
+        [SerializeField] private string fullStateTrigger = "full";
 
-        enum State
-        {
-            SearchingForPlayer,
+        private int detectionRange = 20;
+
+        private PlayerControllerB[] swallowedPlayers = new PlayerControllerB[4];
+        private int swallowedPlayersIndex = 0;
+
+        private bool isFullPlayed = false;
+
+        enum State {
+            IdellingState,
+            Patrolling,
+            FollowingPlayer,
             StickingInFrontOfPlayer,
-            HeadSwingAttackInProgress,
+            SwallowingInProgress,
         }
 
         [Conditional("DEBUG")]
-        void LogIfDebugBuild(string text)
-        {
+        void LogIfDebugBuild(string text) {
             Plugin.Logger.LogInfo(text);
         }
 
-        public override void Start()
-        {
+        public override void Start() {
             base.Start();
-            timeSinceHittingLocalPlayer = 0;
-            creatureAnimator.SetTrigger(startWalkTrigger);
+            DoAnimationClientRpc(startWalkTrigger);
             timeSinceNewRandPos = 0;
             positionRandomness = new Vector3(0, 0, 0);
             enemyRandom = new System.Random(StartOfRound.Instance.randomMapSeed + thisEnemyIndex);
             isDeadAnimationDone = false;
-            // NOTE: Add your behavior states in your enemy script in Unity, where you can configure fun stuff
-            // like a voice clip or an sfx clip to play when changing to that specific behavior state.
-            currentBehaviourStateIndex = (int)State.SearchingForPlayer;
-            // We make the enemy start searching. This will make it start wandering around.
+            detectionRange = Plugin.BoundConfig.DetectionRange.Value;
+
+            agent.speed = 3f;
+
+            currentBehaviourStateIndex = (int)State.Patrolling;
             StartSearch(transform.position);
+
         }
 
-        public override void Update()
-        {
+        public override void Update() {
             base.Update();
-            if (isEnemyDead)
-            {
-                // For some weird reason I can't get an RPC to get called from HitEnemy() (works from other methods), so we do this workaround. We just want the enemy to stop playing the song.
-                if (!isDeadAnimationDone)
-                {
+            if (isEnemyDead) {
+                if (!isDeadAnimationDone) {
                     LogIfDebugBuild("Stopping enemy voice with janky code.");
                     isDeadAnimationDone = true;
                     creatureVoice.Stop();
@@ -76,79 +74,73 @@ namespace TheKirby
                 return;
             }
 
-            timeSinceHittingLocalPlayer += Time.deltaTime;
             timeSinceNewRandPos += Time.deltaTime;
 
             var state = currentBehaviourStateIndex;
-            if (targetPlayer != null && (state == (int)State.StickingInFrontOfPlayer ||
-                                         state == (int)State.HeadSwingAttackInProgress))
-            {
+            if (targetPlayer != null && state == (int)State.StickingInFrontOfPlayer) {
                 turnCompass.LookAt(targetPlayer.gameplayCamera.transform.position);
                 transform.rotation = Quaternion.Lerp(transform.rotation,
                     Quaternion.Euler(new Vector3(0f, turnCompass.eulerAngles.y, 0f)), 4f * Time.deltaTime);
             }
 
-            if (stunNormalizedTimer > 0f)
-            {
+            if (stunNormalizedTimer > 0f) {
                 agent.speed = 0f;
             }
         }
 
-        public override void DoAIInterval()
-        {
+        public override void DoAIInterval() {
             base.DoAIInterval();
-            if (isEnemyDead || StartOfRound.Instance.allPlayersDead)
-            {
+            if (isEnemyDead || StartOfRound.Instance.allPlayersDead) {
                 return;
             }
 
-            ;
+            LogIfDebugBuild("swallowed: " + swallowedPlayersIndex);
 
-            switch (currentBehaviourStateIndex)
-            {
-                case (int)State.SearchingForPlayer:
-                    agent.speed = 3f;
-                    if (FoundClosestPlayerInRange(25f, 3f))
-                    {
-                        LogIfDebugBuild("Start Target Player");
-                        StopSearch(currentSearch);
-                        SwitchToBehaviourClientRpc((int)State.StickingInFrontOfPlayer);
+            if (swallowedPlayersIndex > 3 && !isFullPlayed) {
+                LogIfDebugBuild("\n\n\nSwallowed too many players!\n\n\n");
+                SwitchToBehaviourClientRpc((int)State.IdellingState);
+                StartCoroutine(StopWalking(-1f));
+                return;
+            }
+
+            switch (currentBehaviourStateIndex) {
+                case (int)State.Patrolling:
+                    if (FoundClosestPlayerInRange(detectionRange, 3f)) {
+                        LogIfDebugBuild("Start Following Player");
+                        SwitchToBehaviourClientRpc((int)State.FollowingPlayer);
                     }
+                    break;
 
+                case (int)State.FollowingPlayer:
+                    if (targetPlayer != null &&
+                        Vector3.Distance(transform.position, targetPlayer.transform.position) > 2) {
+                        SetDestinationToPosition(targetPlayer.transform.position);
+                    } else if (targetPlayer != null) {
+                        LogIfDebugBuild("\n\nClose to Player, Stopping\n\n");
+                        // Trigger swallowing attack when close to the player
+                        StartCoroutine(SwallowingAttack());
+                    }
                     break;
 
                 case (int)State.StickingInFrontOfPlayer:
-                    agent.speed = 5f;
-                    // Keep targeting closest player, unless they are over 20 units away and we can't see them.
-                    if (!TargetClosestPlayerInAnyCase() ||
-                        (Vector3.Distance(transform.position, targetPlayer.transform.position) > 20 &&
-                         !CheckLineOfSightForPosition(targetPlayer.transform.position)))
-                    {
-                        LogIfDebugBuild("Stop Target Player");
-                        StartSearch(transform.position);
-                        SwitchToBehaviourClientRpc((int)State.SearchingForPlayer);
-                        return;
-                    }
-
                     StickingInFrontOfPlayer();
                     break;
 
-                case (int)State.HeadSwingAttackInProgress:
+                case (int)State.SwallowingInProgress:
                     // We don't care about doing anything here
                     break;
-
+                case (int)State.IdellingState:
+                    // We don't care about doing anything here
+                    break;
                 default:
                     LogIfDebugBuild("This Behavior State doesn't exist!");
                     break;
             }
         }
 
-        bool FoundClosestPlayerInRange(float range, float senseRange)
-        {
+        bool FoundClosestPlayerInRange(float range, float senseRange) {
             TargetClosestPlayer(bufferDistance: 1.5f, requireLineOfSight: true);
-            if (targetPlayer == null)
-            {
-                // Couldn't see a player, so we check if a player is in sensing distance instead
+            if (targetPlayer == null) {
                 TargetClosestPlayer(bufferDistance: 1.5f, requireLineOfSight: false);
                 range = senseRange;
             }
@@ -157,46 +149,16 @@ namespace TheKirby
                    Vector3.Distance(transform.position, targetPlayer.transform.position) < range;
         }
 
-        bool TargetClosestPlayerInAnyCase()
-        {
-            mostOptimalDistance = 2000f;
-            targetPlayer = null;
-            for (int i = 0; i < StartOfRound.Instance.connectedPlayersAmount + 1; i++)
-            {
-                tempDist = Vector3.Distance(transform.position,
-                    StartOfRound.Instance.allPlayerScripts[i].transform.position);
-                if (tempDist < mostOptimalDistance)
-                {
-                    mostOptimalDistance = tempDist;
-                    targetPlayer = StartOfRound.Instance.allPlayerScripts[i];
-                }
-            }
-
-            if (targetPlayer == null) return false;
-            return true;
-        }
-
-        void StickingInFrontOfPlayer()
-        {
-            // We only run this method for the host because I'm paranoid about randomness not syncing I guess
-            // This is fine because the game does sync the position of the enemy.
-            // Also the attack is a ClientRpc so it should always sync
-            if (targetPlayer == null || !IsOwner)
-            {
+        void StickingInFrontOfPlayer() {
+            if (targetPlayer == null || !IsOwner) {
                 return;
             }
 
-            if (timeSinceNewRandPos > 0.7f)
-            {
+            if (timeSinceNewRandPos > 0.7f) {
                 timeSinceNewRandPos = 0;
-                if (enemyRandom.Next(0, 5) == 0)
-                {
-                    // Attack
-                    StartCoroutine(SwingAttack());
-                }
-                else
-                {
-                    // Go in front of player
+                if (enemyRandom.Next(0, 5) == 0) {
+                    // StartCoroutine(SwallowingAttack());
+                } else {
                     positionRandomness = new Vector3(enemyRandom.Next(-2, 2), 0, enemyRandom.Next(-2, 2));
                     StalkPos = targetPlayer.transform.position -
                         Vector3.Scale(new Vector3(-5, 0, -5), targetPlayer.transform.forward) + positionRandomness;
@@ -206,69 +168,94 @@ namespace TheKirby
             }
         }
 
-        IEnumerator SwingAttack()
-        {
-            SwitchToBehaviourClientRpc((int)State.HeadSwingAttackInProgress);
+        private IEnumerator SwallowingAttack() {
+            SwitchToBehaviourClientRpc((int)State.SwallowingInProgress);
             StalkPos = targetPlayer.transform.position;
             SetDestinationToPosition(StalkPos);
             yield return new WaitForSeconds(.5f);
-            if (isEnemyDead)
-            {
+            if (isEnemyDead) {
                 yield break;
             }
 
-            DoAnimationClientRpc(startAttackTrigger);
-            yield return new WaitForSeconds(0.35f);
-            SwingAttackHitClientRpc();
-            // In case the player has already gone away, we just yield break (basically same as return, but for IEnumerator)
-            if (currentBehaviourStateIndex != (int)State.HeadSwingAttackInProgress)
-            {
+            if (swallowedPlayersIndex >= 4) {
+                LogIfDebugBuild("\n\n\nSwallowed too many players!\n\n\n");
+                SwitchToBehaviourClientRpc((int)State.IdellingState);
                 yield break;
             }
 
-            SwitchToBehaviourClientRpc((int)State.StickingInFrontOfPlayer);
+            SwallowingAttackHitClientRpc();
+            if (currentBehaviourStateIndex != (int)State.SwallowingInProgress) {
+                yield break;
+            }
+
+            if (swallowedPlayersIndex >= 4 && !isFullPlayed) {
+                LogIfDebugBuild("\n\n\nSwallowed too many players!\n\n\n");
+                SwitchToBehaviourClientRpc((int)State.IdellingState);
+                StartCoroutine(StopWalking(-1f));
+            } else {
+                SwitchToBehaviourClientRpc((int)State.FollowingPlayer);
+            }
         }
 
-        public override void OnCollideWithPlayer(Collider other)
-        {
-            if (timeSinceHittingLocalPlayer < 1f)
-            {
+        [ClientRpc]
+        public void SwallowingAttackHitClientRpc() {
+            LogIfDebugBuild("SwallowingAttackHitClientRPC");
+            int playerLayer = 1 << 3;
+            Collider[] hitColliders = Physics.OverlapBox(attackArea.position, attackArea.localScale,
+                Quaternion.identity, playerLayer);
+
+            if (hitColliders.Length <= 0) {
+                LogIfDebugBuild("No player hit!");
                 return;
             }
 
-            PlayerControllerB playerControllerB = MeetsStandardPlayerCollisionConditions(other);
-            if (playerControllerB != null)
-            {
-                LogIfDebugBuild("Example Enemy Collision with Player!");
-                timeSinceHittingLocalPlayer = 0f;
-                // playerControllerB.DamagePlayer(20);
-
+            foreach (var player in hitColliders) {
+                PlayerControllerB playerControllerB = MeetsStandardPlayerCollisionConditions(player);
+                if (playerControllerB != null) {
+                    LogIfDebugBuild("Swallowing attack hit player!");
+                    DoAnimationClientRpc(startAttackTrigger);
+                    creatureVoice.PlayOneShot(attackSFX);
+                    StartCoroutine(WaitToDamage(2f, playerControllerB));
+                    StartCoroutine(StopWalking(10f));
+                    swallowedPlayers[swallowedPlayersIndex] = playerControllerB;
+                    swallowedPlayersIndex++;
+                    SwitchToBehaviourClientRpc((int)State.FollowingPlayer);
+                    break;
+                }
             }
         }
-        public void HitEnemy(int force = 1, PlayerControllerB? playerWhoHit = null, bool playHitSFX = false,
-            int hitID = -1)
-        {
-            LogIfDebugBuild("\naa\naa\nforce: " + force + "\naa\naa\n");
+
+        IEnumerator WaitToDamage(float time, PlayerControllerB playerControler) {
+            yield return new WaitForSeconds(time);
+            playerControler.DamagePlayer(9999);
+        }
+
+        void OnCollisionEnter(Collision collision) {
+
+            LogIfDebugBuild("\n==========\n==========\nCOLISAO\n==========\n==========\n");
+            LogIfDebugBuild(collision.gameObject.name);
+        }
+
+        // new void HitEnemyOnLocalClient(int force, Vector3 hitDirection, PlayerControllerB playerWhoHit, bool playHitSFX) {
+        //     LogIfDebugBuild("\n\n\nHitEnemyOnLocalClient\n\n\n");
+        //     HitEnemy(force, playerWhoHit, playHitSFX);
+        // }
+
+        public override void HitEnemy(int force = 1, PlayerControllerB? playerWhoHit = null, bool playHitSFX = false) {
+            LogIfDebugBuild("\n==========\n==========\nforce: " + force + "\n==========\n==========\n");
+            return;
             base.HitEnemy(force, playerWhoHit, playHitSFX);
-            if (isEnemyDead)
-            {
+            if (isEnemyDead) {
                 return;
             }
 
             enemyHP -= force;
             LogIfDebugBuild("\naa\naa\nEnemy HP: " + enemyHP + "\naa\naa\n");
 
-            if (IsOwner)
-            {
-                if (enemyHP <= 0 && !isEnemyDead)
-                {
+            if (IsOwner) {
+                if (enemyHP <= 0 && !isEnemyDead) {
                     LogIfDebugBuild("\n\n\nEnemy is dead!\n\n\n");
-                    // Our death sound will be played through creatureVoice when KillEnemy() is called.
-                    // KillEnemy() will also attempt to call creatureAnimator.SetTrigger("KillEnemy"),
-                    // so we don't need to call a death animation ourselves.
-
-                    StopCoroutine(SwingAttack());
-                    // We need to stop our search coroutine, because the game does not do that by default.
+                    StopCoroutine(SwallowingAttack());
                     StopCoroutine(searchCoroutine);
                     KillEnemyOnOwnerClient();
                 }
@@ -276,43 +263,33 @@ namespace TheKirby
         }
 
         [ClientRpc]
-        public void DoAnimationClientRpc(string animationName)
-        {
-            LogIfDebugBuild($"Animation: {animationName}");
+        public void DoAnimationClientRpc(string animationName) {
+            LogIfDebugBuild($"\n\nAnimation: {animationName}\n\n");
             creatureAnimator.SetTrigger(animationName);
         }
 
-        [ClientRpc]
-        public void SwingAttackHitClientRpc()
-        {
-            LogIfDebugBuild("SwingAttackHitClientRPC");
-            int playerLayer = 1 << 3; // This can be found from the game's Asset Ripper output in Unity
-            Collider[] hitColliders = Physics.OverlapBox(attackArea.position, attackArea.localScale,
-                Quaternion.identity, playerLayer);
-            if (hitColliders.Length > 0)
-            {
-                foreach (var player in hitColliders)
-                {
-                    PlayerControllerB playerControllerB = MeetsStandardPlayerCollisionConditions(player);
-                    if (playerControllerB != null)
-                    {
-                        LogIfDebugBuild("Swing attack hit player!");
-                        timeSinceHittingLocalPlayer = 0f;
-                        playerControllerB.DamagePlayer(40);
-                        StartCoroutine(StopWalking(15f));
-                    }
-                }
+        IEnumerator StopWalking(float time) {
+            if (time == -1 && isFullPlayed == false) {
+                agent.isStopped = true;
+                DoAnimationClientRpc(fullStateTrigger);
+                creatureVoice.PlayOneShot(fullStateSFX);
+                StopSearch(currentSearch);
+                isFullPlayed = true;
+                yield break;
             }
-        }
 
-        IEnumerator StopWalking(float time)
-        {
-            agent.isStopped = true;
-            creatureAnimator.SetTrigger(stopWalkTrigger);
+            SwitchToBehaviourClientRpc((int)State.IdellingState);
+            agent.speed = 0;
+            DoAnimationClientRpc(stopWalkTrigger);
             yield return new WaitForSeconds(time);
-            creatureAnimator.SetTrigger(startWalkTrigger);
-            agent.isStopped = false;
-        }
+            if (currentBehaviourStateIndex == (int)State.IdellingState && !isFullPlayed) {
+                StartCoroutine(StopWalking(-1));
+                yield break;
+            }
 
+            DoAnimationClientRpc(startWalkTrigger);
+            agent.speed = 3f;
+            SwitchToBehaviourClientRpc((int)State.Patrolling);
+        }
     }
 }
