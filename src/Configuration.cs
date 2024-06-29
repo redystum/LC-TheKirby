@@ -12,6 +12,8 @@ namespace TheKirby.Configuration {
         public ConfigEntry<int> MaxSwallowPlayers;
         public ConfigEntry<int> MaxWeight;
         public ConfigEntry<int> ItemSpawnWeight;
+        public ConfigEntry<int> MinValue;
+        public ConfigEntry<int> MaxValue;
         public PluginConfig(ConfigFile cfg)
         {
             SpawnWeight = cfg.Bind("General", "Spawn weight", 20,
@@ -32,6 +34,15 @@ namespace TheKirby.Configuration {
             ItemSpawnWeight = cfg.Bind("General", "Item spawn weight", -1,
                 "The spawn chance weight for TheKirby, relative to other existing scrap.\n" +
                 "Goes up from 0, lower is more rare, 100 and up is very common. -1 only spawns on kirby kill");
+
+            MinValue = cfg.Bind("General", "Min value", 50,
+                "The minimum value of the item that TheKirby will spawn.\n" +
+                "This is the minimum value of the item that TheKirby will spawn.");
+
+            MaxValue = cfg.Bind("General", "Max value", 100,
+                "The maximum value of the item that TheKirby will spawn.\n" +
+                "This is the maximum value of the item that TheKirby will spawn.");
+
 
 
             ClearUnusedEntries(cfg);

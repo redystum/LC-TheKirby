@@ -18,6 +18,8 @@ namespace TheKirby {
         public Collider SwallowCollider = null!;
 
         [SerializeField] private string startAttackTrigger = "startAttack";
+        [SerializeField] private string fullStaterigger = "full";
+        [SerializeField] private string stopWalkingTrigger = "stopWalking";
 
         private bool IsPlayingMusic = false;
         private bool IsSwallowing = false;
@@ -27,8 +29,13 @@ namespace TheKirby {
         private int MaxWeight = 100;
 
         private float currentWeight = 0f;
-        private float currentValue = 0f;
+        private int currentValue = 0;
         private PlayerControllerB lastOwner = null!;
+
+        public int defaultValue = 0;
+
+        public ulong[] swallowedPlayersByEnemy = new ulong[99];
+        public int swallowedPlayersByEnemyIndex = 0;
         public override void Start() {
             base.Start();
             if (AudioSourceComponent == null) {
@@ -38,6 +45,11 @@ namespace TheKirby {
             AudioSourceComponent.outputAudioMixerGroup = SoundManager.Instance.diageticMixer.FindMatchingGroups("SFX")[0];
 
             MaxWeight = Plugin.BoundConfig.MaxWeight.Value;
+
+            if (defaultValue == 0)
+                defaultValue = Random.Range(Plugin.BoundConfig.MinValue.Value, Plugin.BoundConfig.MaxValue.Value);
+            currentValue = defaultValue;
+            SetScrapValue(defaultValue);
         }
 
         [Conditional("DEBUG")]
@@ -81,16 +93,29 @@ namespace TheKirby {
 
         public override void ItemInteractLeftRight(bool right) {
             base.ItemInteractLeftRight(right);
-            LogIfDebugBuild(AudioSourceComponent.name, true);
+
+            if (playerHeldBy == null)
+                return;
 
             if (!right) {
                 PlaySound(PukeSFX);
+
+                Vector3 inFrontOfPlayer = playerHeldBy.transform.forward;
+                Vector3 newPosition = transform.position + inFrontOfPlayer;
+                for (int i = 0; i < swallowedPlayersByEnemyIndex; i++) {
+                    ulong playerId = swallowedPlayersByEnemy[i];
+                    PlayerControllerB player = StartOfRound.Instance.allPlayerScripts[playerId];
+
+                    player.SpawnDeadBody((int) playerId, newPosition, 5, player);
+                }
+
+                // swallowedPlayersByEnemyIndex = 0;
+                // swallowedPlayersByEnemy = new ulong[99];
+
                 if (SwallowedItemsIndex > 0) {
                     for (int i = 0; i < SwallowedItemsIndex; i++) {
                         GrabbableObject grabbableObject = SwallowedItems[i];
                         if (grabbableObject != null) {
-                            Vector3 inFrontOfPlayer = playerHeldBy.transform.forward;
-                            Vector3 newPosition = transform.position + inFrontOfPlayer;
 
                             GrabbableObject grabbableObjectInstante = Instantiate(grabbableObject, newPosition, Quaternion.identity, RoundManager.Instance.spawnedScrapContainer);
                             grabbableObjectInstante.gameObject.SetActive(true);
@@ -103,6 +128,9 @@ namespace TheKirby {
                     playerHeldBy.carryWeight -= currentWeight;
                     SwallowedItemsIndex = 0;
                     currentWeight = 0;
+                    currentValue = defaultValue;
+                    SetScrapValue(defaultValue);
+                    DoAnimationClientRpc(stopWalkingTrigger);
                 }
 
                 playerHeldBy.carryWeight -= currentWeight;
@@ -110,6 +138,8 @@ namespace TheKirby {
                 currentWeight = 0;
 
             } else {
+                // TODO: if an interaction exist (like open door) dont play
+
                 if (IsPlayingMusic) {
                     AudioSourceComponent.Stop();
                 } else {
@@ -137,6 +167,8 @@ namespace TheKirby {
             string changeTo = !IsPlayingMusic ? "Play: [E]" : "Stop: [E]";
             if (IsOwner)
                 HUDManager.Instance.ChangeControlTip(2, changeTo);
+
+            // BUG: when item is grabed this propriety are changed to all instances so the kirbys not in hand start fly to this position
 
             itemProperties.positionOffset = new Vector3(-.2f, -.1f, -.2f);
             itemProperties.rotationOffset = new Vector3(-90, 180, 100);
@@ -168,6 +200,7 @@ namespace TheKirby {
 
                         if (currentWeight > MaxWeight) {
                             PlaySound(FullSFX);
+                            DoAnimationClientRpc(fullStaterigger);
                             break;
                         }
 
@@ -194,7 +227,9 @@ namespace TheKirby {
                             currentWeight += carryWeight;
                             playerHeldBy.carryWeight += carryWeight;
 
-                            // TODO: SetScrapValue(); of the items inside so the kirby can be sell with the items inside
+                            currentValue += grabbableObject.scrapValue;
+
+                            SetScrapValue(currentValue);
 
                             grabbableObject.gameObject.SetActive(false);
                         }

@@ -14,6 +14,8 @@ namespace TheKirby {
         public AudioClip attackSFX = null!;
         public AudioClip fullStateSFX = null!;
 
+        public Collider SwallowCollider = null!;
+
         private float timeSinceNewRandPos;
         private Vector3 positionRandomness;
         private Vector3 StalkPos;
@@ -23,11 +25,12 @@ namespace TheKirby {
         [SerializeField] private string stopWalkTrigger = "stopWalk";
         [SerializeField] private string startAttackTrigger = "startAttack";
         [SerializeField] private string fullStateTrigger = "full";
+        [SerializeField] private string deathTrigger = "death";
 
         private int detectionRange = 20;
         private int maxSwallowedPlayers = 2;
 
-        private PlayerControllerB[] swallowedPlayers = new PlayerControllerB[99];
+        private ulong[] swallowedPlayers = new ulong[99];
         private int swallowedPlayersIndex = 0;
 
         private bool isFullPlayed = false;
@@ -55,7 +58,7 @@ namespace TheKirby {
             positionRandomness = new Vector3(0, 0, 0);
             enemyRandom = new System.Random(StartOfRound.Instance.randomMapSeed + thisEnemyIndex);
             detectionRange = Plugin.BoundConfig.DetectionRange.Value;
-            maxSwallowedPlayers = Plugin.BoundConfig.MaxSwallowPlayers.Value - 1;
+            maxSwallowedPlayers = Plugin.BoundConfig.MaxSwallowPlayers.Value;
 
             agent.speed = 3f;
 
@@ -200,26 +203,35 @@ namespace TheKirby {
                 return;
             }
 
-            foreach (var player in hitColliders) {
-                PlayerControllerB playerControllerB = MeetsStandardPlayerCollisionConditions(player);
-                if (playerControllerB != null) {
-                    LogIfDebugBuild("Swallowing attack hit player!");
-                    IsAttacking = true;
-                    DoAnimationClientRpc(startAttackTrigger);
-                    creatureVoice.PlayOneShot(attackSFX);
-                    StartCoroutine(WaitToDamage(2f, playerControllerB));
-                    StartCoroutine(StopWalking(10f));
-                    swallowedPlayers[swallowedPlayersIndex] = playerControllerB;
-                    swallowedPlayersIndex++;
-                    SwitchToBehaviourClientRpc((int)State.FollowingPlayer);
-                    break;
-                }
+            PlayerControllerB playerControllerB = MeetsStandardPlayerCollisionConditions(hitColliders[0]);
+            if (playerControllerB != null) {
+                LogIfDebugBuild("Swallowing attack hit player!");
+                IsAttacking = true;
+                DoAnimationClientRpc(startAttackTrigger);
+                StartCoroutine(WaitToPlaySound(0.5f, attackSFX));
+                StartCoroutine(WaitToDamage(2f));
+                StartCoroutine(StopWalking(10f));
+                SwitchToBehaviourClientRpc((int)State.FollowingPlayer);
             }
         }
 
-        IEnumerator WaitToDamage(float time, PlayerControllerB playerControler) {
+        IEnumerator WaitToPlaySound(float time, AudioClip clip) {
             yield return new WaitForSeconds(time);
-            playerControler.DamagePlayer(9999);
+            creatureVoice.PlayOneShot(clip);
+        }
+
+        IEnumerator WaitToDamage(float time) {
+            yield return new WaitForSeconds(time);
+
+            if (SwallowCollider != null && SwallowCollider.enabled) {
+                Collider[] colliders = Physics.OverlapBox(SwallowCollider.bounds.center, SwallowCollider.bounds.extents, SwallowCollider.transform.rotation, 1 << 3);
+                if (colliders.Length > 0) {
+                    PlayerControllerB playerControllerB = MeetsStandardPlayerCollisionConditions(colliders[0]);
+                    swallowedPlayers[swallowedPlayersIndex] = playerControllerB.playerClientId;
+                    swallowedPlayersIndex++;
+                    playerControllerB.KillPlayer(Vector3.zero, false, CauseOfDeath.Suffocation);
+                }
+            }
         }
 
         public override void HitEnemy(int force = 1, PlayerControllerB? playerWhoHit = null, bool playHitSFX = false) {
@@ -235,31 +247,33 @@ namespace TheKirby {
                     StopCoroutine(SwallowingAttack());
                     StopCoroutine(searchCoroutine);
                     creatureVoice.Stop();
-                    DoAnimationClientRpc(stopWalkTrigger);
+                    DoAnimationClientRpc(deathTrigger);
                     KillEnemy();
-                    StartCoroutine(DespawnAfter(3f));
-
                     StartCoroutine(SpawnItem());
-
+                    StartCoroutine(DespawnAfter(3f));
                 }
             }
 
         }
 
         IEnumerator SpawnItem() {
-            yield return new WaitForSeconds(6f);
-            Vector3 position = transform.position + Vector3.up * 1f;
+            yield return new WaitForSeconds(3f);
+            Vector3 position = transform.position + new Vector3(0, 1, 0);
             Quaternion rotation = transform.rotation;
 
-            // TODO: add the swallower bodys to the item
-
             GameObject gameObject2 = Instantiate<GameObject>(GameObject.Find("KirbyItemObj(Clone)"), position, rotation, RoundManager.Instance.spawnedScrapContainer);
-            gameObject2.GetComponent<GrabbableObject>().fallTime = 0.0f;
             gameObject2.GetComponent<NetworkObject>().Spawn();
+
+            LogIfDebugBuild("Swallowed players: " + swallowedPlayersIndex);
+
+            KirbyItem kirbyItem = gameObject2.GetComponent<KirbyItem>();
+            kirbyItem.swallowedPlayersByEnemy = swallowedPlayers;
+            kirbyItem.swallowedPlayersByEnemyIndex = swallowedPlayersIndex;
         }
 
         [ClientRpc]
         public void DoAnimationClientRpc(string animationName) {
+            LogIfDebugBuild("Playing animation: " + animationName);
             creatureAnimator.SetTrigger(animationName);
         }
 
