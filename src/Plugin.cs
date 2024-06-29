@@ -8,7 +8,7 @@ using TheKirby.Configuration;
 
 namespace TheKirby {
     [BepInPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_NAME, PluginInfo.PLUGIN_VERSION)]
-    [BepInDependency(LethalLib.Plugin.ModGUID)] 
+    [BepInDependency(LethalLib.Plugin.ModGUID)]
     public class Plugin : BaseUnityPlugin {
         internal static new ManualLogSource Logger = null!;
         internal static PluginConfig BoundConfig { get; private set; } = null!;
@@ -68,25 +68,35 @@ namespace TheKirby {
             Enemies.RegisterEnemy(TheKirby, BoundConfig.SpawnWeight.Value, Levels.LevelTypes.All, TheKirbyTN, TheKirbyTK);
             // For using our rarity tables, we can use the following:
             // Enemies.RegisterEnemy(TheKirby, TheKirbyLevelRarities, TheKirbyCustomLevelRarities, TheKirbyTN, TheKirbyTK);
-            
+
+
+            int iRarity = BoundConfig.ItemSpawnWeight.Value;
+            Item KirbyItem = ModAssets.LoadAsset<Item>("KirbyItem");
+            NetworkPrefabs.RegisterNetworkPrefab(KirbyItem.spawnPrefab);
+            Utilities.FixMixerGroups(KirbyItem.spawnPrefab);
+            Items.RegisterScrap(KirbyItem, iRarity, Levels.LevelTypes.All);
+
+            TerminalNode node = ScriptableObject.CreateInstance<TerminalNode>();
+            node.clearPreviousText = true;
+            node.displayText = "The Kirby???";
+            Items.RegisterShopItem(KirbyItem, itemInfo: node, price: 6969);
+
             Logger.LogInfo($"Plugin {PluginInfo.PLUGIN_GUID} is loaded!");
+
         }
 
         private static void InitializeNetworkBehaviours() {
             // See https://github.com/EvaisaDev/UnityNetcodePatcher?tab=readme-ov-file#preparing-mods-for-patching
             var types = Assembly.GetExecutingAssembly().GetTypes();
-            foreach (var type in types)
-            {
+            foreach (var type in types) {
                 var methods = type.GetMethods(BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
-                foreach (var method in methods)
-                {
+                foreach (var method in methods) {
                     var attributes = method.GetCustomAttributes(typeof(RuntimeInitializeOnLoadMethodAttribute), false);
-                    if (attributes.Length > 0)
-                    {
+                    if (attributes.Length > 0) {
                         method.Invoke(null, null);
                     }
                 }
             }
-        } 
+        }
     }
 }
