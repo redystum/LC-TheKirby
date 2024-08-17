@@ -7,13 +7,13 @@
     <!-- This is the name of your mod. This will be used by tcli when building our Thunderstore package. -->
     <Product>TheKirby</Product>
     <!-- Change to whatever version you're currently on. This will be used by tcli when building our Thunderstore package. -->
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
   </PropertyGroup>
 
   <!-- Thunderstore CLI stuff -->
   <PropertyGroup>
     <!-- Your Thunderstore Team name. This will be used by tcli when building our Thunderstore package. -->
-    <ThunderstoreTeam>Redystum</ThunderstoreTeam>
+    <ThunderstoreTeam>redystum</ThunderstoreTeam>
     <!-- Configure description for Thunderstore at ./Thunderstore/thunderstore.toml -->
   </PropertyGroup>
 
@@ -93,6 +93,6 @@
   <!-- Build our Thunderstore package when making a release build. This does not publish our package. -->
   <!-- For more information about tcli, see https://github.com/thunderstore-io/thunderstore-cli/wiki -->
   <Target Name="PackThunderstore" DependsOnTargets="NetcodePatch" AfterTargets="PostBuildEvent" Condition="$(Configuration) == 'Release'">
-    <Exec Command="dotnet tcli build --config-path &quot;$(ProjectDir)Thunderstore/thunderstore.toml&quot; --package-version $(Version) --package-name $(Product) --package-namespace $(ThunderstoreTeam)"  />
+    <Exec Command="dotnet tcli build --config-path &quot;$(ProjectDir)Thunderstore\thunderstore.toml&quot; --package-version $(Version) --package-name $(Product) --package-namespace $(ThunderstoreTeam)"  />
   </Target>
 </Project>

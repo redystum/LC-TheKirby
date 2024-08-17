@@ -1,6 +1,9 @@
 ﻿using System.Collections;
 using System.Diagnostics;
+using System.Resources;
+using System.Runtime.Serialization;
 using GameNetcodeStuff;
+using LethalLib.Modules;
 using Unity.Netcode;
 using UnityEngine;
 
@@ -29,14 +32,16 @@ namespace TheKirby {
 
         private int detectionRange = 20;
         private int maxSwallowedPlayers = 2;
+        private bool useItem = false;
 
         private ulong[] swallowedPlayers = new ulong[99];
         private int swallowedPlayersIndex = 0;
 
         private bool isFullPlayed = false;
 
-        public Item customScrap = null!;
         private bool IsAttacking = false;
+
+        private Item kirbyItem = null!;
 
         enum State {
             IdellingState,
@@ -48,7 +53,9 @@ namespace TheKirby {
 
         [Conditional("DEBUG")]
         void LogIfDebugBuild(string text) {
+            Plugin.Logger.LogInfo("===========");
             Plugin.Logger.LogInfo(text);
+            Plugin.Logger.LogInfo("===========");
         }
 
         public override void Start() {
@@ -59,6 +66,11 @@ namespace TheKirby {
             enemyRandom = new System.Random(StartOfRound.Instance.randomMapSeed + thisEnemyIndex);
             detectionRange = Plugin.BoundConfig.DetectionRange.Value;
             maxSwallowedPlayers = Plugin.BoundConfig.MaxSwallowPlayers.Value;
+            useItem = Plugin.BoundConfig.UseItem.Value;
+
+            kirbyItem = StartOfRound.Instance.allItemsList.itemsList.Find(item => item.itemName.ToLower() == "kirby");
+
+            LogIfDebugBuild(kirbyItem.itemName);
 
             agent.speed = 3f;
 
@@ -249,7 +261,11 @@ namespace TheKirby {
                     creatureVoice.Stop();
                     DoAnimationClientRpc(deathTrigger);
                     KillEnemy();
-                    StartCoroutine(SpawnItem());
+
+                    if (useItem) {
+                        StartCoroutine(SpawnItem());
+                    }
+
                     StartCoroutine(DespawnAfter(3f));
                 }
             }
@@ -261,14 +277,21 @@ namespace TheKirby {
             Vector3 position = transform.position + new Vector3(0, 1, 0);
             Quaternion rotation = transform.rotation;
 
-            GameObject gameObject2 = Instantiate<GameObject>(GameObject.Find("KirbyItemObj(Clone)"), position, rotation, RoundManager.Instance.spawnedScrapContainer);
-            gameObject2.GetComponent<NetworkObject>().Spawn();
+            GameObject kirbyGameObject = Instantiate<GameObject>(this.kirbyItem.spawnPrefab, position, rotation, RoundManager.Instance.spawnedScrapContainer);
+
+            GrabbableObject component = kirbyGameObject.GetComponent<GrabbableObject>();
+            component.startFallingPosition = position;
+            component.targetFloorPosition = component.GetItemFloorPosition(transform.position);
+            component.SetScrapValue(Random.Range(Plugin.BoundConfig.MinValue.Value, Plugin.BoundConfig.MaxValue.Value));
+
+            KirbyItem kirbyItem = kirbyGameObject.GetComponent<KirbyItem>();
+            kirbyItem.swallowedPlayersByEnemy = swallowedPlayers;
+            kirbyItem.swallowedPlayersByEnemyIndex = swallowedPlayersIndex;
+
+            component.NetworkObject.Spawn();
 
             LogIfDebugBuild("Swallowed players: " + swallowedPlayersIndex);
 
-            KirbyItem kirbyItem = gameObject2.GetComponent<KirbyItem>();
-            kirbyItem.swallowedPlayersByEnemy = swallowedPlayers;
-            kirbyItem.swallowedPlayersByEnemyIndex = swallowedPlayersIndex;
         }
 
         [ClientRpc]

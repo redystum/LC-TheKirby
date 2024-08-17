@@ -1,12 +1,12 @@
 [config]
-schemaVersion = "0.0.1"
+schemaVersion = "1.0.1"
 
 [general]
-repository = "https://thunderstore.io"
+repository = "https://github.com/redystum/LC-TheKirby"
 
 [package]
-description = "Example Enemy for Lethal Company."
-websiteUrl = "https://github.com/Hamunii/LC-ExampleEnemy"
+description = "I think i have seen a Kirby somewhere..."
+websiteUrl = "https://github.com/redystum/LC-TheKirby"
 containsNsfwContent = false
 [package.dependencies]
 BepInEx-BepInExPack = "5.4.2100"
@@ -18,11 +18,11 @@ readme = "./README.md"
 outdir = "./Packages"
 
 [[build.copy]]
-source = "../bin/Release/netstandard2.1/Hamunii.ExampleEnemy.dll"
+source = "../bin/Release/netstandard2.1/Redystum.TheKirby.dll"
 target = "plugins/ExampleEnemy/"
 
 [[build.copy]]
-source = "../../UnityProject/AssetBundles/StandaloneWindows/modassets"
+source = "../../UnityProject/AssetBundles/StandaloneWindows/modassetsthekirby"
 target = "plugins/ExampleEnemy/"
 
 [[build.copy]]

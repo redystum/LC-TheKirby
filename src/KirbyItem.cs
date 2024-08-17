@@ -42,6 +42,8 @@ namespace TheKirby {
                 AudioSourceComponent = gameObject.GetComponent<AudioSource>();
             }
 
+            LogIfDebugBuild(swallowedPlayersByEnemyIndex.ToString());
+
             AudioSourceComponent.outputAudioMixerGroup = SoundManager.Instance.diageticMixer.FindMatchingGroups("SFX")[0];
 
             MaxWeight = Plugin.BoundConfig.MaxWeight.Value;

@@ -14,8 +14,14 @@ namespace TheKirby.Configuration {
         public ConfigEntry<int> ItemSpawnWeight;
         public ConfigEntry<int> MinValue;
         public ConfigEntry<int> MaxValue;
+        public ConfigEntry<bool> UseItem;
         public PluginConfig(ConfigFile cfg)
         {
+            UseItem = cfg.Bind("General", "Use item", false,
+                "Whether or not TheKirby should spawn the kirby item on death. \n" +
+                "The kirby item is bugged, using it will cause loss or multiplication of items. Use at your own risk. \n" +
+                "true = spawns kirby item, false = does not spawn any item.");
+
             SpawnWeight = cfg.Bind("General", "Spawn weight", 20,
                 "The spawn chance weight for TheKirby, relative to other existing enemies.\n" +
                 "Goes up from 0, lower is more rare, 100 and up is very common.");
