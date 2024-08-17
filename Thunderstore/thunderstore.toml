@@ -1,5 +1,5 @@
 [config]
-schemaVersion = "1.0.1"
+schemaVersion = "1.0.2"
 
 [general]
 repository = "https://github.com/redystum/LC-TheKirby"
@@ -19,11 +19,11 @@ outdir = "./Packages"
 
 [[build.copy]]
 source = "../bin/Release/netstandard2.1/Redystum.TheKirby.dll"
-target = "plugins/ExampleEnemy/"
+target = "plugins/Redystum.TheKirby/"
 
 [[build.copy]]
 source = "../../UnityProject/AssetBundles/StandaloneWindows/modassetsthekirby"
-target = "plugins/ExampleEnemy/"
+target = "plugins/Redystum.TheKirby/"
 
 [[build.copy]]
 source = "./CHANGELOG.md"
