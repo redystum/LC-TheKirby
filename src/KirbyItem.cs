@@ -5,6 +5,12 @@ using Unity.Netcode;
 using UnityEngine;
 
 namespace TheKirby {
+    class SwallowedItens {
+        public string name;
+        public int scrapValue;
+        public float weight;
+    }
+
     class KirbyItem : PhysicsProp {
         public AudioClip MusicSFX = null!;
         public AudioClip NavEnterSFX = null!;
@@ -24,7 +30,7 @@ namespace TheKirby {
         private bool IsPlayingMusic = false;
         private bool IsSwallowing = false;
 
-        private GrabbableObject[] SwallowedItems = new GrabbableObject[99];
+        private SwallowedItens[] SwallowedItems = new SwallowedItens[99];
         private int SwallowedItemsIndex = 0;
         private int MaxWeight = 100;
 
@@ -104,26 +110,38 @@ namespace TheKirby {
 
                 Vector3 inFrontOfPlayer = playerHeldBy.transform.forward;
                 Vector3 newPosition = transform.position + inFrontOfPlayer;
+
                 for (int i = 0; i < swallowedPlayersByEnemyIndex; i++) {
                     ulong playerId = swallowedPlayersByEnemy[i];
                     PlayerControllerB player = StartOfRound.Instance.allPlayerScripts[playerId];
 
-                    player.SpawnDeadBody((int) playerId, newPosition, 5, player);
+                    player.SpawnDeadBody((int)playerId, newPosition, 5, player);
                 }
 
-                // swallowedPlayersByEnemyIndex = 0;
-                // swallowedPlayersByEnemy = new ulong[99];
+                swallowedPlayersByEnemyIndex = 0;
+                swallowedPlayersByEnemy = new ulong[99];
+
+                LogIfDebugBuild(SwallowedItemsIndex.ToString());
 
                 if (SwallowedItemsIndex > 0) {
                     for (int i = 0; i < SwallowedItemsIndex; i++) {
-                        GrabbableObject grabbableObject = SwallowedItems[i];
-                        if (grabbableObject != null) {
+                        LogIfDebugBuild(SwallowedItems[i].name, true);
+                        Item item = StartOfRound.Instance.allItemsList.itemsList.Find(item => item.itemName == SwallowedItems[i].name);
 
-                            GrabbableObject grabbableObjectInstante = Instantiate(grabbableObject, newPosition, Quaternion.identity, RoundManager.Instance.spawnedScrapContainer);
-                            grabbableObjectInstante.gameObject.SetActive(true);
-                            grabbableObjectInstante.GetComponent<NetworkObject>().Spawn();
+                        if (item != null) {
 
-                            Destroy(grabbableObject.gameObject);
+                            GameObject kirbyGameObject = Instantiate<GameObject>(item.spawnPrefab, newPosition, Quaternion.identity, RoundManager.Instance.spawnedScrapContainer);
+
+                            GrabbableObject component = kirbyGameObject.GetComponent<GrabbableObject>();
+                            component.startFallingPosition = newPosition;
+                            component.targetFloorPosition = component.GetItemFloorPosition(transform.position);
+                            component.SetScrapValue(SwallowedItems[i].scrapValue);
+                            component.itemProperties.weight = SwallowedItems[i].weight;
+
+                            component.NetworkObject.Spawn();
+
+                        } else {
+                            LogIfDebugBuild("GrabbableObject is null", true);
                         }
                     }
 
@@ -161,6 +179,7 @@ namespace TheKirby {
             if (!IsOwner)
                 return;
             HUDManager.Instance.DisplayTip("To use the Kirby:", "Press LMB to swallow scrap (max. 3), and Q to puke them on the ground.", useSave: true, prefsKey: "LCTip_UseManual");
+            HUDManager.Instance.ChangeControlTip(3, "Puke: [Q]");
         }
 
         public override void GrabItem() {
@@ -207,38 +226,68 @@ namespace TheKirby {
                         }
 
 
-                        GrabbableObject grabbableObject = collider.GetComponent<GrabbableObject>();
-                        if (grabbableObject != null) {
-                            bool alreadySwallowed = false;
-                            if (SwallowedItemsIndex > 0) {
-                                for (int i = 0; i < SwallowedItemsIndex; i++) {
-                                    if (grabbableObject == SwallowedItems[i]) {
-                                        alreadySwallowed = true;
-                                    }
-                                }
-                            }
+                        GrabbableObject beeingSwallowed = collider.GetComponent<GrabbableObject>();
+                        if (beeingSwallowed != null) {
 
-                            if (alreadySwallowed) {
-                                continue;
-                            }
+                            SwallowedItems[SwallowedItemsIndex] = new SwallowedItens {
+                                name = beeingSwallowed.itemProperties.itemName,
+                                scrapValue = beeingSwallowed.scrapValue,
+                                weight = beeingSwallowed.itemProperties.weight
+                            };
 
-                            SwallowedItems[SwallowedItemsIndex] = grabbableObject;
                             SwallowedItemsIndex++;
 
-                            var carryWeight = Mathf.Clamp(grabbableObject.itemProperties.weight - 1f, 0f, 10f);
+                            var carryWeight = Mathf.Clamp(beeingSwallowed.itemProperties.weight - 1f, 0f, 10f);
                             currentWeight += carryWeight;
                             playerHeldBy.carryWeight += carryWeight;
 
-                            currentValue += grabbableObject.scrapValue;
+                            currentValue += beeingSwallowed.scrapValue;
 
                             SetScrapValue(currentValue);
 
-                            grabbableObject.gameObject.SetActive(false);
+                            DespawnItemServerRpc((NetworkBehaviourReference)(NetworkBehaviour)beeingSwallowed);
+
                         }
                     }
                 }
             }
 
+        }
+
+        [ServerRpc(RequireOwnership = false)]
+        public void DespawnItemServerRpc(NetworkBehaviourReference grabbableRef) {
+            GrabbableObject grabbableObject;
+
+            if (grabbableRef.TryGet<GrabbableObject>(out grabbableObject)) {
+                DespawnItem(grabbableObject.gameObject);
+            } else {
+                LogIfDebugBuild("Failed to retrieve GrabbableObject from NetworkBehaviourReference.", true);
+            }
+        }
+
+        private void DespawnItem(GameObject item) {
+            NetworkObject networkObject = item.GetComponent<NetworkObject>();
+            if (networkObject != null) {
+                networkObject.Despawn();
+            }
+        }
+
+        [ServerRpc(RequireOwnership = false)]
+        public void SpawnItemServerRpc(NetworkBehaviourReference grabbableRef) {
+            GrabbableObject grabbableObject;
+
+            if (grabbableRef.TryGet<GrabbableObject>(out grabbableObject)) {
+                SpawnItem(grabbableObject);
+            } else {
+                LogIfDebugBuild("Failed to retrieve GrabbableObject from NetworkBehaviourReference.", true);
+            }
+        }
+
+        private void SpawnItem(GrabbableObject item) {
+            NetworkObject networkObject = item.GetComponent<NetworkObject>();
+            if (networkObject != null) {
+                networkObject.Spawn();
+            }
         }
     }
 }
