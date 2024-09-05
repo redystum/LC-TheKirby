@@ -6,6 +6,7 @@ using GameNetcodeStuff;
 using LethalLib.Modules;
 using Unity.Netcode;
 using UnityEngine;
+using Random = UnityEngine.Random;
 
 namespace TheKirby {
     class ExampleEnemyAI : EnemyAI {
@@ -241,12 +242,12 @@ namespace TheKirby {
                     PlayerControllerB playerControllerB = MeetsStandardPlayerCollisionConditions(colliders[0]);
                     swallowedPlayers[swallowedPlayersIndex] = playerControllerB.playerClientId;
                     swallowedPlayersIndex++;
-                    playerControllerB.KillPlayer(Vector3.zero, false, CauseOfDeath.Suffocation);
+                    playerControllerB.KillPlayer(Vector3.zero, false, CauseOfDeath.Suffocation, 0, Vector3.zero);
                 }
             }
         }
 
-        public override void HitEnemy(int force = 1, PlayerControllerB? playerWhoHit = null, bool playHitSFX = false) {
+        public override void HitEnemy(int force = 1, PlayerControllerB? playerWhoHit = null, bool playHitSFX = false, int hitID = -1) {
             base.HitEnemy(force, playerWhoHit, playHitSFX);
             if (isEnemyDead) {
                 return;
